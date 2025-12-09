@@ -16,21 +16,20 @@ Task management via Vikunja API with lean JSON output (~95% fewer tokens than MC
 
 ## Project IDs
 
-Reference table for commonly used projects:
+| ID | Name |
+|----|------|
+| 1 | Backlog |
+| 2 | Aktiv |
 
-| ID | Name | Description |
-|----|------|-------------|
-| 1 | Inbox | Default project for quick captures |
-| 2 | Work | Work-related tasks |
-
-## Label IDs
-
-Reference table for commonly used labels:
+## Label IDs (GTD-Kontexte)
 
 | ID | Name |
 |----|------|
-| 1 | urgent |
-| 2 | waiting |
+| 2 | @computer |
+| 3 | @energie-hoch |
+| 4 | @telefon |
+| 5 | @draussen |
+| 6 | @energie-niedrig |
 
 ## Notes
 
