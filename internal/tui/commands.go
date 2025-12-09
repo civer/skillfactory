@@ -109,6 +109,9 @@ func (m Model) deploySkill() tea.Cmd {
 			return deployCompleteMsg{err: fmt.Errorf("failed to generate docs: %w", err)}
 		}
 
+		// Cleanup: remove dist directory
+		os.RemoveAll(distDir)
+
 		return deployCompleteMsg{}
 	}
 }
