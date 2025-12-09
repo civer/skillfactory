@@ -15,10 +15,8 @@ func (m Model) View() string {
 	var b strings.Builder
 
 	// Header
-	b.WriteString(titleStyle.Render("⚙️  SkillFactory"))
-	b.WriteString(mutedStyle.Render(" " + m.version))
-	b.WriteString("\n")
-	b.WriteString(subtitleStyle.Render("Build & Deploy Claude Code Skills"))
+	b.WriteString(titleStyle.Render("Claude SkillFactory"))
+	b.WriteString(mutedStyle.Render("  " + m.version))
 	b.WriteString("\n\n")
 
 	// Main content based on current view
@@ -27,6 +25,8 @@ func (m Model) View() string {
 		b.WriteString(m.renderSkillList())
 	case ViewConfig:
 		b.WriteString(m.renderConfig())
+	case ViewDeploy:
+		b.WriteString(m.renderDeploy())
 	case ViewConfirm:
 		b.WriteString(m.renderConfirm())
 	case ViewOverwrite:
@@ -110,34 +110,64 @@ func (m Model) renderConfig() string {
 	var b strings.Builder
 
 	if m.selectedSkill != nil {
-		b.WriteString(inputLabelStyle.Render(fmt.Sprintf("Configure: %s", m.selectedSkill.Name)))
+		b.WriteString(inputLabelStyle.Render(fmt.Sprintf("Step 1: %s Environment", m.selectedSkill.Name)))
 	} else {
-		b.WriteString(inputLabelStyle.Render("Configure Skill"))
+		b.WriteString(inputLabelStyle.Render("Step 1: Skill Environment"))
 	}
 	b.WriteString("\n\n")
 
-	for i, input := range m.inputs {
+	for i, input := range m.configInputs {
 		// Label with focus indicator
 		labelStyle := mutedStyle
 		prefix := "  "
-		if i == m.inputFocus {
+		if i == m.configFocus {
 			labelStyle = inputLabelStyle
 			prefix = "▸ "
 		}
 
 		// Show label
-		label := m.inputLabels[i]
+		label := m.configLabels[i]
 
-		// Add (required) or (optional) indicator
+		// Add required indicator
 		if m.selectedSkill != nil && i < len(m.selectedSkill.Variables) {
 			v := m.selectedSkill.Variables[i]
 			if v.Required {
 				label += " *"
 			}
-		} else if i >= len(m.inputs)-2 {
-			// Skills Folder and Skill Name are always required
-			label += " *"
 		}
+
+		b.WriteString(prefix)
+		b.WriteString(labelStyle.Render(label))
+		b.WriteString("\n")
+
+		// Input field
+		b.WriteString("  ")
+		b.WriteString(input.View())
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString(mutedStyle.Render("  * required"))
+
+	return boxStyle.Render(b.String())
+}
+
+func (m Model) renderDeploy() string {
+	var b strings.Builder
+
+	b.WriteString(inputLabelStyle.Render("Step 2: Deploy Settings"))
+	b.WriteString("\n\n")
+
+	for i, input := range m.deployInputs {
+		// Label with focus indicator
+		labelStyle := mutedStyle
+		prefix := "  "
+		if i == m.deployFocus {
+			labelStyle = inputLabelStyle
+			prefix = "▸ "
+		}
+
+		// Show label - all deploy fields are required
+		label := m.deployLabels[i] + " *"
 
 		b.WriteString(prefix)
 		b.WriteString(labelStyle.Render(label))
@@ -157,42 +187,48 @@ func (m Model) renderConfig() string {
 func (m Model) renderConfirm() string {
 	var b strings.Builder
 
-	b.WriteString(inputLabelStyle.Render("Confirm Configuration"))
+	b.WriteString(inputLabelStyle.Render("Step 3: Confirm"))
 	b.WriteString("\n\n")
 
 	// Show skill info
 	if m.selectedSkill != nil {
-		b.WriteString(mutedStyle.Render("  Skill:       "))
+		b.WriteString(mutedStyle.Render("  Skill:         "))
 		b.WriteString(normalStyle.Render(m.selectedSkill.Name))
-		b.WriteString("\n")
+		b.WriteString("\n\n")
 
 		// Show all configured values
-		for i, v := range m.selectedSkill.Variables {
-			b.WriteString(mutedStyle.Render(fmt.Sprintf("  %-12s ", v.Label+":")))
-
-			value := m.inputs[i].Value()
-			if v.Type == "secret" && len(value) > 8 {
-				value = value[:8] + "..."
+		if len(m.selectedSkill.Variables) > 0 {
+			b.WriteString(mutedStyle.Render("  Environment:"))
+			b.WriteString("\n")
+			for _, v := range m.selectedSkill.Variables {
+				value := m.configValues[v.Name]
+				if v.Type == "secret" && len(value) > 8 {
+					value = value[:8] + "..."
+				}
+				b.WriteString(mutedStyle.Render(fmt.Sprintf("    %-12s ", v.Label+":")))
+				b.WriteString(normalStyle.Render(value))
+				b.WriteString("\n")
 			}
-			b.WriteString(normalStyle.Render(value))
 			b.WriteString("\n")
 		}
 	}
 
 	// Deploy configuration
-	b.WriteString(mutedStyle.Render("  Skills Folder: "))
+	b.WriteString(mutedStyle.Render("  Deploy:"))
+	b.WriteString("\n")
+	b.WriteString(mutedStyle.Render("    Skills Folder: "))
 	b.WriteString(normalStyle.Render(m.skillsFolder))
 	b.WriteString("\n")
-	b.WriteString(mutedStyle.Render("  Skill Name:    "))
+	b.WriteString(mutedStyle.Render("    Skill Name:    "))
 	b.WriteString(normalStyle.Render(m.skillFolderName))
 	b.WriteString("\n")
-	b.WriteString(mutedStyle.Render("  Deploy to:     "))
+	b.WriteString(mutedStyle.Render("    Target:        "))
 	b.WriteString(successStyle.Render(m.getDeployPath()))
 	b.WriteString("\n\n")
 
 	b.WriteString(normalStyle.Render("  Build and deploy this skill?"))
 	b.WriteString("\n")
-	b.WriteString(mutedStyle.Render("  [Y] Yes  [N] Back to edit"))
+	b.WriteString(mutedStyle.Render("  [Y] Yes  [N] Back"))
 
 	return boxStyle.Render(b.String())
 }
@@ -238,7 +274,7 @@ func (m Model) renderDone() string {
 func (m Model) renderOverwrite() string {
 	var b strings.Builder
 
-	b.WriteString(errorStyle.Render("⚠️  Skill existiert bereits"))
+	b.WriteString(errorStyle.Render("⚠️  Skill already exists"))
 	b.WriteString("\n\n")
 
 	skillName := "skill"
@@ -246,17 +282,17 @@ func (m Model) renderOverwrite() string {
 		skillName = m.selectedSkill.Name
 	}
 
-	b.WriteString(mutedStyle.Render("  Der Skill \""))
+	b.WriteString(mutedStyle.Render("  The skill \""))
 	b.WriteString(normalStyle.Render(skillName))
-	b.WriteString(mutedStyle.Render("\" existiert bereits unter:"))
+	b.WriteString(mutedStyle.Render("\" already exists at:"))
 	b.WriteString("\n")
 	b.WriteString("  ")
 	b.WriteString(normalStyle.Render(m.getDeployPath()))
 	b.WriteString("\n\n")
 
-	b.WriteString(normalStyle.Render("  Überschreiben?"))
+	b.WriteString(normalStyle.Render("  Overwrite?"))
 	b.WriteString("\n")
-	b.WriteString(mutedStyle.Render("  [Y] Ja, überschreiben  [N] Abbrechen"))
+	b.WriteString(mutedStyle.Render("  [Y] Yes, overwrite  [N] Cancel"))
 
 	return boxStyle.Render(b.String())
 }
@@ -268,11 +304,13 @@ func (m Model) renderHelp() string {
 	case ViewSkillList:
 		help = "↑/↓: Navigate • Enter: Select • q: Quit"
 	case ViewConfig:
-		help = "↑/↓/Tab: Navigate • Enter: Continue • Esc: Back"
+		help = "↑/↓/Tab: Navigate • Enter: Next Step • Esc: Back"
+	case ViewDeploy:
+		help = "↑/↓/Tab: Navigate • Enter: Next Step • Esc: Back"
 	case ViewConfirm:
-		help = "Y/Enter: Build & Deploy • N/Esc: Back to edit"
+		help = "Y/Enter: Build & Deploy • N/Esc: Back"
 	case ViewOverwrite:
-		help = "Y: Überschreiben • N/Esc: Abbrechen"
+		help = "Y: Overwrite • N/Esc: Cancel"
 	case ViewBuilding:
 		help = "Building..."
 	case ViewDone:

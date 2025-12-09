@@ -15,7 +15,8 @@ type View int
 
 const (
 	ViewSkillList View = iota // Start here: list of available skills
-	ViewConfig                // Configure selected skill
+	ViewConfig                // Configure skill environment variables
+	ViewDeploy                // Configure deploy settings (folder, name)
 	ViewConfirm               // Confirm and deploy
 	ViewOverwrite             // Warning: skill already exists
 	ViewBuilding              // Building in progress
@@ -33,12 +34,17 @@ type Model struct {
 	selectedSkill *skill.Manifest
 	selectedError *skill.SkillError // Selected error skill (for viewing errors)
 
-	// Dynamic input fields based on skill variables
-	inputs       []textinput.Model
-	inputLabels  []string
-	inputFocus   int
+	// Skill environment variable inputs
+	configInputs      []textinput.Model
+	configLabels      []string
+	configFocus       int
 
-	// Deploy configuration
+	// Deploy settings inputs
+	deployInputs      []textinput.Model
+	deployLabels      []string
+	deployFocus       int
+
+	// Deploy configuration (saved values)
 	skillsFolder    string // Base folder for skills (e.g., /path/to/.claude/skills/)
 	skillFolderName string // Subfolder name for this skill (default: skill name)
 
@@ -93,7 +99,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-		// Config view: handle inputs FIRST, then navigation
+		// Config view: handle skill variable inputs
 		if m.currentView == ViewConfig {
 			switch msg.String() {
 			case "esc":
@@ -101,28 +107,70 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.errorMsg = ""
 				return m, nil
 			case "tab", "down":
-				m.inputs[m.inputFocus].Blur()
-				m.inputFocus = (m.inputFocus + 1) % len(m.inputs)
-				m.inputs[m.inputFocus].Focus()
+				m.configInputs[m.configFocus].Blur()
+				m.configFocus = (m.configFocus + 1) % len(m.configInputs)
+				m.configInputs[m.configFocus].Focus()
 				return m, textinput.Blink
 			case "shift+tab", "up":
-				m.inputs[m.inputFocus].Blur()
-				m.inputFocus--
-				if m.inputFocus < 0 {
-					m.inputFocus = len(m.inputs) - 1
+				m.configInputs[m.configFocus].Blur()
+				m.configFocus--
+				if m.configFocus < 0 {
+					m.configFocus = len(m.configInputs) - 1
 				}
-				m.inputs[m.inputFocus].Focus()
+				m.configInputs[m.configFocus].Focus()
 				return m, textinput.Blink
 			case "ctrl+d", "enter":
-				// Done editing - validate and continue
-				if m.validateInputs() {
-					m.saveConfigValues()
+				// Validate and continue to deploy settings
+				if m.validateConfigInputs() {
+					m.saveConfigInputs()
+					m.setupDeployInputs()
+					m.currentView = ViewDeploy
+				}
+				return m, textinput.Blink
+			default:
+				// Pass ALL other keys to the text input
+				return m.updateConfigInputs(msg)
+			}
+		}
+
+		// Deploy view: handle deploy settings inputs
+		if m.currentView == ViewDeploy {
+			switch msg.String() {
+			case "esc":
+				m.currentView = ViewConfig
+				m.errorMsg = ""
+				// Re-focus config inputs
+				m.configFocus = 0
+				for i := range m.configInputs {
+					m.configInputs[i].Blur()
+				}
+				if len(m.configInputs) > 0 {
+					m.configInputs[0].Focus()
+				}
+				return m, textinput.Blink
+			case "tab", "down":
+				m.deployInputs[m.deployFocus].Blur()
+				m.deployFocus = (m.deployFocus + 1) % len(m.deployInputs)
+				m.deployInputs[m.deployFocus].Focus()
+				return m, textinput.Blink
+			case "shift+tab", "up":
+				m.deployInputs[m.deployFocus].Blur()
+				m.deployFocus--
+				if m.deployFocus < 0 {
+					m.deployFocus = len(m.deployInputs) - 1
+				}
+				m.deployInputs[m.deployFocus].Focus()
+				return m, textinput.Blink
+			case "ctrl+d", "enter":
+				// Validate and continue to confirm
+				if m.validateDeployInputs() {
+					m.saveDeployInputs()
 					m.currentView = ViewConfirm
 				}
 				return m, nil
 			default:
 				// Pass ALL other keys to the text input
-				return m.updateInputs(msg)
+				return m.updateDeployInputs(msg)
 			}
 		}
 
@@ -209,10 +257,13 @@ func (m Model) handleSkillListView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleConfirmView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "n":
-		m.currentView = ViewConfig
-		m.inputFocus = 0
-		if len(m.inputs) > 0 {
-			m.inputs[0].Focus()
+		m.currentView = ViewDeploy
+		m.deployFocus = 0
+		for i := range m.deployInputs {
+			m.deployInputs[i].Blur()
+		}
+		if len(m.deployInputs) > 0 {
+			m.deployInputs[0].Focus()
 		}
 		return m, textinput.Blink
 	case "enter", "y":
@@ -282,16 +333,16 @@ func (m Model) handleDoneView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// setupInputsFromManifest creates input fields from the skill's variables
+// setupInputsFromManifest creates input fields for skill environment variables
 func (m *Model) setupInputsFromManifest() {
 	if m.selectedSkill == nil {
 		return
 	}
 
-	// Create inputs for all variables + 2 deploy fields (skills folder + skill name)
-	numInputs := len(m.selectedSkill.Variables) + 2
-	m.inputs = make([]textinput.Model, numInputs)
-	m.inputLabels = make([]string, numInputs)
+	// Create inputs for skill variables only
+	numInputs := len(m.selectedSkill.Variables)
+	m.configInputs = make([]textinput.Model, numInputs)
+	m.configLabels = make([]string, numInputs)
 
 	for i, v := range m.selectedSkill.Variables {
 		input := textinput.New()
@@ -306,17 +357,31 @@ func (m *Model) setupInputsFromManifest() {
 			input.EchoMode = textinput.EchoPassword
 		}
 
-		// Load existing value if any (but don't pre-fill defaults)
+		// Load existing value if any
 		if val, ok := m.configValues[v.Name]; ok {
 			input.SetValue(val)
 		}
-		// Default is only shown as placeholder, not pre-filled
 
-		m.inputs[i] = input
-		m.inputLabels[i] = v.Label
+		m.configInputs[i] = input
+		m.configLabels[i] = v.Label
 	}
 
-	// Skills Folder input (second to last)
+	// Focus first input
+	m.configFocus = 0
+	for i := range m.configInputs {
+		m.configInputs[i].Blur()
+	}
+	if len(m.configInputs) > 0 {
+		m.configInputs[0].Focus()
+	}
+}
+
+// setupDeployInputs creates input fields for deploy settings
+func (m *Model) setupDeployInputs() {
+	m.deployInputs = make([]textinput.Model, 2)
+	m.deployLabels = make([]string, 2)
+
+	// Skills Folder input
 	skillsFolderInput := textinput.New()
 	skillsFolderInput.Placeholder = "/path/to/.claude/skills/"
 	skillsFolderInput.CharLimit = 200
@@ -324,31 +389,33 @@ func (m *Model) setupInputsFromManifest() {
 	if m.skillsFolder != "" {
 		skillsFolderInput.SetValue(m.skillsFolder)
 	}
-	m.inputs[numInputs-2] = skillsFolderInput
-	m.inputLabels[numInputs-2] = "Skills Folder"
+	m.deployInputs[0] = skillsFolderInput
+	m.deployLabels[0] = "Skills Folder"
 
-	// Skill Name input (last) - pre-filled with skill name
+	// Skill Name input - pre-filled with skill name
 	skillNameInput := textinput.New()
-	skillNameInput.Placeholder = m.selectedSkill.Name
+	if m.selectedSkill != nil {
+		skillNameInput.Placeholder = m.selectedSkill.Name
+	}
 	skillNameInput.CharLimit = 100
 	skillNameInput.Width = 50
 	if m.skillFolderName != "" {
 		skillNameInput.SetValue(m.skillFolderName)
-	} else {
+	} else if m.selectedSkill != nil {
 		skillNameInput.SetValue(m.selectedSkill.Name)
 	}
-	m.inputs[numInputs-1] = skillNameInput
-	m.inputLabels[numInputs-1] = "Skill Name"
+	m.deployInputs[1] = skillNameInput
+	m.deployLabels[1] = "Skill Name"
 
 	// Focus first input
-	m.inputFocus = 0
-	for i := range m.inputs {
-		m.inputs[i].Blur()
+	m.deployFocus = 0
+	for i := range m.deployInputs {
+		m.deployInputs[i].Blur()
 	}
-	m.inputs[0].Focus()
+	m.deployInputs[0].Focus()
 }
 
-func (m *Model) validateInputs() bool {
+func (m *Model) validateConfigInputs() bool {
 	if m.selectedSkill == nil {
 		m.errorMsg = "No skill selected"
 		return false
@@ -356,21 +423,26 @@ func (m *Model) validateInputs() bool {
 
 	// Validate required variables
 	for i, v := range m.selectedSkill.Variables {
-		if v.Required && m.inputs[i].Value() == "" {
+		if v.Required && m.configInputs[i].Value() == "" {
 			m.errorMsg = v.Label + " is required"
 			return false
 		}
 	}
 
-	// Validate skills folder (second to last input)
-	skillsFolder := m.inputs[len(m.inputs)-2].Value()
+	m.errorMsg = ""
+	return true
+}
+
+func (m *Model) validateDeployInputs() bool {
+	// Validate skills folder
+	skillsFolder := m.deployInputs[0].Value()
 	if skillsFolder == "" {
 		m.errorMsg = "Skills Folder is required"
 		return false
 	}
 
-	// Validate skill name (last input)
-	skillName := m.inputs[len(m.inputs)-1].Value()
+	// Validate skill name
+	skillName := m.deployInputs[1].Value()
 	if skillName == "" {
 		m.errorMsg = "Skill Name is required"
 		return false
@@ -380,19 +452,20 @@ func (m *Model) validateInputs() bool {
 	return true
 }
 
-func (m *Model) saveConfigValues() {
+func (m *Model) saveConfigInputs() {
 	if m.selectedSkill == nil {
 		return
 	}
 
 	// Save variable values
 	for i, v := range m.selectedSkill.Variables {
-		m.configValues[v.Name] = m.inputs[i].Value()
+		m.configValues[v.Name] = m.configInputs[i].Value()
 	}
+}
 
-	// Save deploy configuration
-	m.skillsFolder = m.inputs[len(m.inputs)-2].Value()
-	m.skillFolderName = m.inputs[len(m.inputs)-1].Value()
+func (m *Model) saveDeployInputs() {
+	m.skillsFolder = m.deployInputs[0].Value()
+	m.skillFolderName = m.deployInputs[1].Value()
 }
 
 // getDeployPath returns the full deploy path (skillsFolder + skillFolderName)
@@ -400,10 +473,18 @@ func (m Model) getDeployPath() string {
 	return filepath.Join(m.skillsFolder, m.skillFolderName)
 }
 
-func (m Model) updateInputs(msg tea.Msg) (tea.Model, tea.Cmd) {
-	cmds := make([]tea.Cmd, len(m.inputs))
-	for i := range m.inputs {
-		m.inputs[i], cmds[i] = m.inputs[i].Update(msg)
+func (m Model) updateConfigInputs(msg tea.Msg) (tea.Model, tea.Cmd) {
+	cmds := make([]tea.Cmd, len(m.configInputs))
+	for i := range m.configInputs {
+		m.configInputs[i], cmds[i] = m.configInputs[i].Update(msg)
+	}
+	return m, tea.Batch(cmds...)
+}
+
+func (m Model) updateDeployInputs(msg tea.Msg) (tea.Model, tea.Cmd) {
+	cmds := make([]tea.Cmd, len(m.deployInputs))
+	for i := range m.deployInputs {
+		m.deployInputs[i], cmds[i] = m.deployInputs[i].Update(msg)
 	}
 	return m, tea.Batch(cmds...)
 }
