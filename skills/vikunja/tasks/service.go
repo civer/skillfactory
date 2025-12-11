@@ -11,16 +11,29 @@ import (
 	"github.com/petervogelmann/skillfactory/skills/vikunja/client"
 )
 
-// formatDate converts YYYY-MM-DD to RFC3339 format with local timezone
+// formatDate converts date strings to RFC3339 format with local timezone
+// Supported formats:
+//   - YYYY-MM-DD (defaults to 00:00)
+//   - YYYY-MM-DDTHH:MM (e.g., 2025-12-13T12:00)
+//   - Full RFC3339 (passed through)
 func formatDate(date string) string {
 	if date == "" {
 		return ""
 	}
-	// Already complete (contains T)?
-	if strings.Contains(date, "T") {
+	// Already complete RFC3339 (contains T and timezone)?
+	if strings.Contains(date, "T") && (strings.Contains(date, "Z") || strings.Contains(date, "+") || strings.Contains(date, "-") && strings.Count(date, "-") > 2) {
 		return date
 	}
-	// YYYY-MM-DD → Parse as local time, then output RFC3339
+	// YYYY-MM-DDTHH:MM format?
+	if strings.Contains(date, "T") {
+		t, err := time.ParseInLocation("2006-01-02T15:04", date, time.Local)
+		if err != nil {
+			// Fallback: append seconds and Z
+			return date + ":00Z"
+		}
+		return t.Format(time.RFC3339)
+	}
+	// YYYY-MM-DD → Parse as local time at 00:00, then output RFC3339
 	t, err := time.ParseInLocation("2006-01-02", date, time.Local)
 	if err != nil {
 		// Fallback: just append T00:00:00Z
