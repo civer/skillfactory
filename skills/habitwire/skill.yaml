@@ -1,0 +1,36 @@
+name: habitwire
+description: Habit tracking via HabitWire API (Lean JSON)
+skill_description: Manage habits, categories, and track daily check-ins. View streaks and completion statistics.
+version: 1.0.0
+
+variables:
+  - name: HABITWIRE_URL
+    label: HabitWire URL
+    description: Base URL of your HabitWire instance (e.g., http://localhost:3000)
+    required: true
+    placeholder: "http://localhost:3000"
+    type: string
+
+  - name: HABITWIRE_API_KEY
+    label: API Key
+    description: API key from HabitWire Settings
+    required: true
+    placeholder: "your-api-key"
+    type: secret
+
+build:
+  entry: "."
+  binary: habitwire
+
+deploy:
+  files:
+    - source: "bin/{{binary}}"
+      target: "bin/{{binary}}"
+    - source: "SKILL.md"
+      target: "SKILL.md"
+
+  wrapper: true
+
+docs:
+  template: SKILL.template.md
+  output: SKILL.md
