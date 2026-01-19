@@ -87,11 +87,14 @@ func (m Model) deploySkill() tea.Cmd {
 		// Ensure destination directories exist
 		os.MkdirAll(dstBinDir, 0755)
 
-		// Copy binary
+		// Copy binary (remove old one first to avoid issues with running processes)
 		binaryData, err := os.ReadFile(srcBinary)
 		if err != nil {
 			return deployCompleteMsg{err: fmt.Errorf("failed to read binary: %w", err)}
 		}
+
+		// Remove existing binary first to ensure clean overwrite
+		os.Remove(dstBinary)
 
 		if err := os.WriteFile(dstBinary, binaryData, 0755); err != nil {
 			return deployCompleteMsg{err: fmt.Errorf("failed to write binary: %w", err)}
